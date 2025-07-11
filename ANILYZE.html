@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Character Face Matcher</title>
+    <!-- Tailwind CSS CDN for easy styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for the body and font */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        /* Ensure video and canvas elements are responsive */
+        video, canvas {
+            max-width: 100%;
+            height: auto;
+            border-radius: 0.75rem; /* rounded-xl */
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); /* shadow-xl */
+        }
+        /* Hide the captured image initially */
+        #capturedImage {
+            display: none;
+        }
+        /* Style for disabled elements */
+        .disabled-overlay {
+            pointer-events: none;
+            opacity: 0.5;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen p-4">
+
+    <div class="bg-white p-8 rounded-2xl shadow-2xl max-w-lg w-full text-center space-y-6">
+        <h1 class="text-4xl font-extrabold text-gray-800 mb-6">Character Face Matcher</h1>
+        <p class="text-gray-600 mb-8">
+            Select your gender, then capture your photo to see which cartoon or anime character you resemble!
+            (Note: The AI matching part is simulated for this demo.)
+        </p>
+
+        <!-- Gender Selection Section -->
+        <div id="genderSelection" class="mb-8 p-6 bg-blue-50 rounded-xl shadow-inner">
+            <h2 class="text-2xl font-semibold text-blue-800 mb-4">Select Your Gender</h2>
+            <div class="flex flex-wrap justify-center gap-4">
+                <label class="inline-flex items-center cursor-pointer">
+                    <input type="radio" name="gender" value="male" class="form-radio h-5 w-5 text-blue-600" id="genderMale">
+                    <span class="ml-2 text-gray-700 text-lg">Male</span>
+                </label>
+                <label class="inline-flex items-center cursor-pointer">
+                    <input type="radio" name="gender" value="female" class="form-radio h-5 w-5 text-pink-600" id="genderFemale">
+                    <span class="ml-2 text-gray-700 text-lg">Female</span>
+                </label>
+                <label class="inline-flex items-center cursor-pointer">
+                    <input type="radio" name="gender" value="any" class="form-radio h-5 w-5 text-purple-600" id="genderAny" checked>
+                    <span class="ml-2 text-gray-700 text-lg">Any / Other</span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Camera and Capture Section -->
+        <div id="cameraSection" class="space-y-6 disabled-overlay">
+            <!-- Video element to display camera feed -->
+            <video id="cameraFeed" class="w-full rounded-xl shadow-xl border-4 border-blue-500" autoplay playsinline></video>
+
+            <!-- Button to trigger photo capture -->
+            <button id="captureButton" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-full shadow-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-blue-300">
+                Take Photo
+            </button>
+        </div>
+
+        <!-- Canvas to draw the captured image (hidden) -->
+        <canvas id="photoCanvas" class="hidden"></canvas>
+
+        <!-- Image element to display the captured photo -->
+        <img id="capturedImage" class="w-full rounded-xl shadow-xl mt-8 border-4 border-green-500 hidden" alt="Captured Photo">
+
+        <!-- Result section for character match -->
+        <div id="resultSection" class="mt-8 p-6 bg-purple-50 rounded-xl shadow-inner hidden">
+            <h2 class="text-2xl font-semibold text-purple-800 mb-4">Your Character Match:</h2>
+            <img id="characterMatchImage" class="w-32 h-32 mx-auto rounded-full object-cover border-4 border-purple-400 shadow-md mb-4" src="https://placehold.co/128x128/9333ea/ffffff?text=Character" alt="Character Match">
+            <p id="characterMatchName" class="text-xl font-medium text-purple-700">Analyzing...</p>
+            <p class="text-sm text-gray-500 mt-2">
+                (In a real application, this would be determined by an AI model based on color, face structure, and shape.)
+            </p>
+            <button id="retakeButton" class="mt-6 bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-full shadow transition duration-300 ease-in-out">
+                Retake Photo
+            </button>
+        </div>
+
+        <!-- Message box for user feedback -->
+        <div id="messageBox" class="fixed bottom-4 right-4 bg-red-600 text-white p-3 rounded-lg shadow-lg hidden z-50">
+            <span id="messageText"></span>
+            <button onclick="document.getElementById('messageBox').classList.add('hidden')" class="ml-2 text-white font-bold">&times;</button>
+        </div>
+    </div>
+
+    <script>
+        // Get references to HTML elements
+        const genderSelection = document.getElementById('genderSelection');
+        const genderRadios = document.querySelectorAll('input[name="gender"]');
+        const cameraSection = document.getElementById('cameraSection');
+        const cameraFeed = document.getElementById('cameraFeed');
+        const captureButton = document.getElementById('captureButton');
+        const photoCanvas = document.getElementById('photoCanvas');
+        const capturedImage = document.getElementById('capturedImage');
+        const resultSection = document.getElementById('resultSection');
+        const characterMatchImage = document.getElementById('characterMatchImage');
+        const characterMatchName = document.getElementById('characterMatchName');
+        const retakeButton = document.getElementById('retakeButton');
+        const messageBox = document.getElementById('messageBox');
+        const messageText = document.getElementById('messageText');
+
+        let stream; // Variable to hold the camera stream
+        let selectedGender = 'any'; // Default selected gender
+
+        // Sample cartoon/anime characters with gender (Expanded list with real images for some)
+        const characters = [
+            // Male Characters (50 entries)
+            { name: "Goku (Dragon Ball Z)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/9/90/Goku_and_his_family.jpg/220px-Goku_and_his_family.jpg", gender: "male" },
+            { name: "Naruto Uzumaki (Naruto)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/9/94/Naruto_Uzumaki.png/220px-Naruto_Uzumaki.png", gender: "male" },
+            { name: "Ash Ketchum (Pokemon)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/5/52/Ash_Ketchum_anime_design.png/220px-Ash_Ketchum_anime_design.png", gender: "male" },
+            { name: "SpongeBob SquarePants", image: "https://upload.wikimedia.org/wikipedia/en/thumb/3/3b/SpongeBob_SquarePants_character.svg/1200px-SpongeBob_SquarePants_character.svg.png", gender: "male" },
+            { name: "Luffy (One Piece)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/9/94/Monkey_D._Luffy_anime_design.png/220px-Monkey_D._Luffy_anime_design.png", gender: "male" },
+            { name: "Vegeta (Dragon Ball Z)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/0/05/Vegeta_Dragon_Ball.png/220px-Vegeta_Dragon_Ball.png", gender: "male" },
+            { name: "Izuku Midoriya (My Hero Academia)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/4/4c/Izuku_Midoriya.png/220px-Izuku_Midoriya.png", gender: "male" },
+            { name: "Eren Yeager (Attack on Titan)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/d/d6/Eren_Yeager_anime_design.png/220px-Eren_Yeager_anime_design.png", gender: "male" },
+            { name: "Light Yagami (Death Note)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/6/6f/Light_Yagami.png/220px-Light_Yagami.png", gender: "male" },
+            { name: "Gojo Satoru (Jujutsu Kaisen)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/e/e4/Satoru_Gojo.png/220px-Satoru_Gojo.png", gender: "male" },
+            { name: "Tanjiro Kamado (Demon Slayer)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/0/0d/Tanjiro_Kamado_anime_design.png/220px-Tanjiro_Kamado_anime_design.png", gender: "male" },
+            { name: "Edward Elric (Fullmetal Alchemist)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/7/7e/Edward_Elric.png/220px-Edward_Elric.png", gender: "male" },
+            { name: "Kirito (Sword Art Online)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/4/4e/Kirito_anime_design.png/220px-Kirito_anime_design.png", gender: "male" },
+            { name: "Sonic the Hedgehog", image: "https://upload.wikimedia.org/wikipedia/en/thumb/1/10/Sonic_the_Hedgehog_2020.png/220px-Sonic_the_Hedgehog_2020.png", gender: "male" },
+            { name: "Mario (Super Mario Bros.)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/a9/Mario_character_artwork_-_New_Super_Mario_Bros._2.png/220px-Mario_character_artwork_-_New_Super_Mario_Bros._2.png", gender: "male" },
+            { name: "Link (The Legend of Zelda)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/a2/Link_BotW.png/220px-Link_BotW.png", gender: "male" },
+            { name: "Homer Simpson", image: "https://upload.wikimedia.org/wikipedia/en/thumb/0/02/Homer_Simpson_2006.png/220px-Homer_Simpson_2006.png", gender: "male" },
+            { name: "Peter Griffin (Family Guy)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/c/c2/Peter_Griffin.png/220px-Peter_Griffin.png", gender: "male" },
+            { name: "Rick Sanchez (Rick and Morty)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/a6/Rick_Sanchez.png/220px-Rick_Sanchez.png", gender: "male" },
+            { name: "Morty Smith (Rick and Morty)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/e/ee/Morty_Smith.png/220px-Morty_Smith.png", gender: "male" },
+            { name: "Finn the Human (Adventure Time)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/c/c6/Finn_the_Human.png/220px-Finn_the_Human.png", gender: "male" },
+            { name: "Jake the Dog (Adventure Time)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/3/3b/Jake_the_Dog.png/220px-Jake_the_Dog.png", gender: "male" },
+            { name: "Dipper Pines (Gravity Falls)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/a7/Dipper_Pines.png/220px-Dipper_Pines.png", gender: "male" },
+            { name: "Steven Universe", image: "https://upload.wikimedia.org/wikipedia/en/thumb/c/c5/Steven_Universe_character.png/220px-Steven_Universe_character.png", gender: "male" },
+            { name: "Ben Tennyson (Ben 10)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/9/90/Ben_Tennyson.png/220px-Ben_Tennyson.png", gender: "male" },
+            { name: "Danny Phantom", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/a6/Danny_Phantom_character.png/220px-Danny_Phantom_character.png", gender: "male" },
+            { name: "Aang (Avatar: The Last Airbender)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/2/25/Aang_character.png/220px-Aang_character.png", gender: "male" },
+            { name: "Zuko (Avatar: The Last Airbender)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/f/f6/Prince_Zuko.png/220px-Prince_Zuko.png", gender: "male" },
+            { name: "Sokka (Avatar: The Last Airbender)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/c/cc/Sokka.png/220px-Sokka.png", gender: "male" },
+            { name: "Gumball Watterson (The Amazing World of Gumball)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/1/12/Gumball_Watterson.png/220px-Gumball_Watterson.png", gender: "male" },
+            { name: "Mordecai (Regular Show)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/b/b3/Mordecai_Regular_Show.png/220px-Mordecai_Regular_Show.png", gender: "male" },
+            { name: "Rigby (Regular Show)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/3/37/Rigby_Regular_Show.png/220px-Rigby_Regular_Show.png", gender: "male" },
+            { name: "Courage the Cowardly Dog", image: "https://upload.wikimedia.org/wikipedia/en/thumb/b/b3/Courage_the_Cowardly_Dog.png/220px-Courage_the_Cowardly_Dog.png", gender: "male" },
+            { name: "Johnny Bravo", image: "https://upload.wikimedia.org/wikipedia/en/thumb/c/c5/Johnny_Bravo.png/220px-Johnny_Bravo.png", gender: "male" },
+            { name: "Dexter (Dexter's Laboratory)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/c/c2/Dexter_character.png/220px-Dexter_character.png", gender: "male" },
+            { name: "Fred Flintstone", image: "https://upload.wikimedia.org/wikipedia/en/thumb/9/91/Fred_Flintstone.png/220px-Fred_Flintstone.png", gender: "male" },
+            { name: "Scooby Doo", image: "https://upload.wikimedia.org/wikipedia/en/thumb/4/43/Scooby-Doo.png/220px-Scooby-Doo.png", gender: "male" },
+            { name: "Shaggy Rogers", image: "https://upload.wikimedia.org/wikipedia/en/thumb/5/52/Shaggy_Rogers.png/220px-Shaggy_Rogers.png", gender: "male" },
+            { name: "Popeye the Sailor", image: "https://upload.wikimedia.org/wikipedia/en/thumb/2/2f/Popeye_the_Sailor.png/220px-Popeye_the_Sailor.png", gender: "male" },
+            { name: "Felix the Cat", image: "https://upload.wikimedia.org/wikipedia/en/thumb/9/96/Felix_the_Cat.png/220px-Felix_the_Cat.png", gender: "male" },
+            { name: "Woody Woodpecker", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/a2/Woody_Woodpecker.png/220px-Woody_Woodpecker.png", gender: "male" },
+            { name: "Tom Cat (Tom and Jerry)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/7/79/Tom_Cat.png/220px-Tom_Cat.png", gender: "male" },
+            { name: "Jerry Mouse (Tom and Jerry)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/a3/Jerry_Mouse.png/220px-Jerry_Mouse.png", gender: "male" },
+            { name: "Daffy Duck", image: "https://upload.wikimedia.org/wikipedia/en/thumb/f/f4/Daffy_Duck.svg/220px-Daffy_Duck.svg.png", gender: "male" },
+            { name: "Bugs Bunny", image: "https://upload.wikimedia.org/wikipedia/en/thumb/1/17/Bugs_Bunny.svg/220px-Bugs_Bunny.svg.png", gender: "male" },
+            { name: "Elmer Fudd", image: "https://upload.wikimedia.org/wikipedia/en/thumb/0/06/Elmer_Fudd.svg/220px-Elmer_Fudd.svg.png", gender: "male" },
+            { name: "Yogi Bear", image: "https://upload.wikimedia.org/wikipedia/en/thumb/6/69/Yogi_Bear.png/220px-Yogi_Bear.png", gender: "male" },
+            { name: "Huckleberry Hound", image: "https://upload.wikimedia.org/wikipedia/en/thumb/d/d3/Huckleberry_Hound.png/220px-Huckleberry_Hound.png", gender: "male" },
+            { name: "He-Man", image: "https://upload.wikimedia.org/wikipedia/en/thumb/6/6c/He-Man_character.png/220px-He-Man_character.png", gender: "male" },
+            { name: "Johnny Quest", image: "https://upload.wikimedia.org/wikipedia/en/thumb/d/d2/Jonny_Quest.png/220px-Jonny_Quest.png", gender: "male" },
+
+            // Female Characters (50 entries)
+            { name: "Sailor Moon", image: "https://upload.wikimedia.org/wikipedia/en/thumb/0/00/Sailor_Moon_character.png/220px-Sailor_Moon_character.png", gender: "female" },
+            { name: "Sakura Haruno (Naruto)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/6/62/Sakura_Haruno.png/220px-Sakura_Haruno.png", gender: "female" },
+            { name: "Bulma (Dragon Ball)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/e/e0/Bulma_Dragon_Ball.png/220px-Bulma_Dragon_Ball.png", gender: "female" },
+            { name: "Elsa (Frozen)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/f/f6/ElsaFrozen.jpg/220px-ElsaFrozen.jpg", gender: "female" },
+            { name: "Marge Simpson", image: "https://upload.wikimedia.org/wikipedia/en/thumb/0/0b/Marge_Simpson.png/220px-Marge_Simpson.png", gender: "female" },
+            { name: "Mikasa Ackerman (Attack on Titan)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/2/21/Mikasa_Ackerman.png/220px-Mikasa_Ackerman.png", gender: "female" },
+            { name: "Ochaco Uraraka (My Hero Academia)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/a2/Ochaco_Uraraka.png/220px-Ochaco_Uraraka.png", gender: "female" },
+            { name: "Erza Scarlet (Fairy Tail)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/b/b5/Erza_Scarlet.png/220px-Erza_Scarlet.png", gender: "female" },
+            { name: "Rem (Re:Zero)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/4/4b/Rem_ReZero.png/220px-Rem_ReZero.png", gender: "female" },
+            { name: "Asuna Yuuki (Sword Art Online)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/a5/Asuna_Yuuki.png/220px-Asuna_Yuuki.png", gender: "female" },
+            { name: "Rukia Kuchiki (Bleach)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/2/27/Rukia_Kuchiki.png/220px-Rukia_Kuchiki.png", gender: "female" },
+            { name: "Yor Forger (Spy x Family)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/b/b3/Yor_Forger.png/220px-Yor_Forger.png", gender: "female" },
+            { name: "Anya Forger (Spy x Family)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/a4/Anya_Forger.png/220px-Anya_Forger.png", gender: "female" },
+            { name: "Nezuko Kamado (Demon Slayer)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/e/e0/Nezuko_Kamado.png/220px-Nezuko_Kamado.png", gender: "female" },
+            { name: "Violet Evergarden", image: "https://upload.wikimedia.org/wikipedia/en/thumb/f/f6/Violet_Evergarden_anime_design.png/220px-Violet_Evergarden_anime_design.png", gender: "female" },
+            { name: "Winry Rockbell (Fullmetal Alchemist)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/e/e3/Winry_Rockbell.png/220px-Winry_Rockbell.png", gender: "female" },
+            { name: "Tiana (The Princess and the Frog)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/2/27/Princess_Tiana.png/220px-Princess_Tiana.png", gender: "female" },
+            { name: "Moana", image: "https://upload.wikimedia.org/wikipedia/en/thumb/e/e7/Moana_character.png/220px-Moana_character.png", gender: "female" },
+            { name: "Rapunzel (Tangled)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/2/22/Rapunzel_character.png/220px-Rapunzel_character.png", gender: "female" },
+            { name: "Belle (Beauty and the Beast)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/d/d4/Belle_Beauty_and_the_Beast_2017.png/220px-Belle_Beauty_and_the_Beast_2017.png", gender: "female" },
+            { name: "Ariel (The Little Mermaid)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/d/d4/Ariel_character.png/220px-Ariel_character.png", gender: "female" },
+            { name: "Cinderella", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/a4/Cinderella_character.png/220px-Cinderella_character.png", gender: "female" },
+            { name: "Snow White", image: "https://upload.wikimedia.org/wikipedia/en/thumb/9/91/Snow_White.png/220px-Snow_White.png", gender: "female" },
+            { name: "Aurora (Sleeping Beauty)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/d/d1/Aurora_character.png/220px-Aurora_character.png", gender: "female" },
+            { name: "Jasmine (Aladdin)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/a8/Princess_Jasmine.png/220px-Princess_Jasmine.png", gender: "female" },
+            { name: "Pocahontas", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/a0/Pocahontas_character.png/220px-Pocahontas_character.png", gender: "female" },
+            { name: "Mulan", image: "https://upload.wikimedia.org/wikipedia/en/thumb/b/b3/Mulan_character.png/220px-Mulan_character.png", gender: "female" },
+            { name: "Merida (Brave)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/e/e9/Merida_character.png/220px-Merida_character.png", gender: "female" },
+            { name: "Anna (Frozen)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/a6/Anna_character.png/220px-Anna_character.png", gender: "female" },
+            { name: "Alice (Alice in Wonderland)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/0/05/Alice_in_Wonderland_character.png/220px-Alice_in_Wonderland_character.png", gender: "female" },
+            { name: "Betty Boop", image: "https://upload.wikimedia.org/wikipedia/en/thumb/b/b3/Betty_Boop.png/220px-Betty_Boop.png", gender: "female" },
+            { name: "Jessica Rabbit (Who Framed Roger Rabbit)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/f/f1/Jessica_Rabbit.png/220px-Jessica_Rabbit.png", gender: "female" },
+            { name: "Wilma Flintstone", image: "https://upload.wikimedia.org/wikipedia/en/thumb/0/01/Wilma_Flintstone.png/220px-Wilma_Flintstone.png", gender: "female" },
+            { name: "Daphne Blake (Scooby Doo)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/f/f6/Daphne_Blake.png/220px-Daphne_Blake.png", gender: "female" },
+            { name: "Velma Dinkley (Scooby Doo)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/4/47/Velma_Dinkley.png/220px-Velma_Dinkley.png", gender: "female" },
+            { name: "Kim Possible", image: "https://upload.wikimedia.org/wikipedia/en/thumb/1/18/Kim_Possible.png/220px-Kim_Possible.png", gender: "female" },
+            { name: "Starfire (Teen Titans)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/ae/Starfire_Teen_Titans.png/220px-Starfire_Teen_Titans.png", gender: "female" },
+            { name: "Raven (Teen Titans)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/e/e0/Raven_Teen_Titans.png/220px-Raven_Teen_Titans.png", gender: "female" },
+            { name: "Bubbles (The Powerpuff Girls)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/0/0e/Bubbles_Powerpuff_Girls.png/220px-Bubbles_Powerpuff_Girls.png", gender: "female" },
+            { name: "Blossom (The Powerpuff Girls)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/0/03/Blossom_Powerpuff_Girls.png/220px-Blossom_Powerpuff_Girls.png", gender: "female" },
+            { name: "Buttercup (The Powerpuff Girls)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/c/c8/Buttercup_Powerpuff_Girls.png/220px-Buttercup_Powerpuff_Girls.png", gender: "female" },
+            { name: "Dora the Explorer", image: "https://upload.wikimedia.org/wikipedia/en/thumb/b/b1/Dora_the_Explorer.png/220px-Dora_the_Explorer.png", gender: "female" },
+            { name: "Angelica Pickles (Rugrats)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/2/29/Angelica_Pickles.png/220px-Angelica_Pickles.png", gender: "female" },
+            { name: "Lisa Simpson", image: "https://upload.wikimedia.org/wikipedia/en/thumb/e/ec/Lisa_Simpson.png/220px-Lisa_Simpson.png", gender: "female" },
+            { name: "Lois Griffin (Family Guy)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/1/11/Lois_Griffin.png/220px-Lois_Griffin.png", gender: "female" },
+            { name: "Meg Griffin (Family Guy)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/b/b3/Meg_Griffin.png/220px-Meg_Griffin.png", gender: "female" },
+            { name: "Louise Belcher (Bob's Burgers)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/c/c2/Louise_Belcher.png/220px-Louise_Belcher.png", gender: "female" },
+            { name: "Tina Belcher (Bob's Burgers)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/0/04/Tina_Belcher.png/220px-Tina_Belcher.png", gender: "female" },
+            { name: "Mabel Pines (Gravity Falls)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/1/10/Mabel_Pines.png/220px-Mabel_Pines.png", gender: "female" },
+            { name: "Katara (Avatar: The Last Airbender)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/d/d3/Katara.png/220px-Katara.png", gender: "female" },
+
+            // Gender-neutral or Other Characters (50 entries)
+            { name: "Pikachu (Pokemon)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/a6/Pikachu_artwork_for_Pokemon_Red_and_Blue.png/220px-Pikachu_artwork_for_Pokemon_Red_and_Blue.png", gender: "any" },
+            { name: "Bugs Bunny", image: "https://upload.wikimedia.org/wikipedia/en/thumb/1/17/Bugs_Bunny.svg/220px-Bugs_Bunny.svg.png", gender: "any" },
+            { name: "Minion (Despicable Me)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/8/87/Minion_Bob.png/220px-Minion_Bob.png", gender: "any" },
+            { name: "Doraemon", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/a9/Doraemon_character.png/220px-Doraemon_character.png", gender: "any" },
+            { name: "Hello Kitty", image: "https://upload.wikimedia.org/wikipedia/en/thumb/0/0f/Hello_Kitty_character.png/220px-Hello_Kitty_character.png", gender: "any" },
+            { name: "Totoro (My Neighbor Totoro)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/5/5a/Totoro_character.png/220px-Totoro_character.png", gender: "any" },
+            { name: "Snoopy (Peanuts)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/b/b5/Snoopy_Peanuts.png/220px-Snoopy_Peanuts.png", gender: "any" },
+            { name: "Woodstock (Peanuts)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/e/e6/Woodstock_Peanuts.png/220px-Woodstock_Peanuts.png", gender: "any" },
+            { name: "Groot (Guardians of the Galaxy)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/e/e7/Groot_character.png/220px-Groot_character.png", gender: "any" },
+            { name: "Baymax (Big Hero 6)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/e/e5/Baymax_character.png/220px-Baymax_character.png", gender: "any" },
+            { name: "Wall-E", image: "https://upload.wikimedia.org/wikipedia/en/thumb/7/7b/WALL-E_character.png/220px-WALL-E_character.png", gender: "any" },
+            { name: "EVE (Wall-E)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/e/e5/EVE_character.png/220px-EVE_character.png", gender: "any" },
+            { name: "R2-D2 (Star Wars)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/3/36/R2-D2_character.png/220px-R2-D2_character.png", gender: "any" },
+            { name: "BB-8 (Star Wars)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/8/87/BB-8_character.png/220px-BB-8_character.png", gender: "any" },
+            { name: "Toothless (How to Train Your Dragon)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/2/2a/Toothless_character.png/220px-Toothless_character.png", gender: "any" },
+            { name: "Stitch (Lilo & Stitch)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/8/88/Stitch_character.png/220px-Stitch_character.png", gender: "any" },
+            { name: "Olaf (Frozen)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/f/f6/Olaf_character.png/220px-Olaf_character.png", gender: "any" },
+            { name: "Po (Kung Fu Panda)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/8/87/Po_character.png/220px-Po_character.png", gender: "any" },
+            { name: "Shrek", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/a9/Shrek_character.png/220px-Shrek_character.png", gender: "any" },
+            { name: "Donkey (Shrek)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/b/b1/Donkey_Shrek.png/220px-Donkey_Shrek.png", gender: "any" },
+            { name: "Puss in Boots", image: "https://upload.wikimedia.org/wikipedia/en/thumb/8/83/Puss_in_Boots.png/220px-Puss_in_Boots.png", gender: "any" },
+            { name: "Smurf (The Smurfs)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/a2/Papa_Smurf.png/220px-Papa_Smurf.png", gender: "any" },
+            { name: "Garfield", image: "https://upload.wikimedia.org/wikipedia/en/thumb/b/bf/Garfield_character.png/220px-Garfield_character.png", gender: "any" },
+            { name: "Odie (Garfield)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/f/f3/Odie_Garfield.png/220px-Odie_Garfield.png", gender: "any" },
+            { name: "Pluto (Disney)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/7/77/Pluto_character.png/220px-Pluto_character.png", gender: "any" },
+            { name: "Goofy (Disney)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/e/e0/Goofy_character.png/220px-Goofy_character.png", gender: "any" },
+            { name: "Donald Duck", image: "https://upload.wikimedia.org/wikipedia/en/thumb/c/c1/Donald_Duck.svg/220px-Donald_Duck.svg.png", gender: "any" },
+            { name: "Mickey Mouse", image: "https://upload.wikimedia.org/wikipedia/en/thumb/3/3e/Mickey_Mouse_character.png/220px-Mickey_Mouse_character.png", gender: "any" },
+            { name: "Minnie Mouse", image: "https://upload.wikimedia.org/wikipedia/en/thumb/0/07/Minnie_Mouse_character.png/220px-Minnie_Mouse_character.png", gender: "any" },
+            { name: "Winnie the Pooh", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/aa/Winnie_the_Pooh_character.png/220px-Winnie_the_Pooh_character.png", gender: "any" },
+            { name: "Tigger (Winnie the Pooh)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/4/47/Tigger_character.png/220px-Tigger_character.png", gender: "any" },
+            { name: "Piglet (Winnie the Pooh)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/ae/Piglet_character.png/220px-Piglet_character.png", gender: "any" },
+            { name: "Eeyore (Winnie the Pooh)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/9/91/Eeyore_character.png/220px-Eeyore_character.png", gender: "any" },
+            { name: "Kermit the Frog (The Muppets)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/7/7b/Kermit_the_Frog.png/220px-Kermit_the_Frog.png", gender: "any" },
+            { name: "Miss Piggy (The Muppets)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/1/11/Miss_Piggy.png/220px-Miss_Piggy.png", gender: "any" },
+            { name: "Cookie Monster (Sesame Street)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/1/1c/Cookie_Monster.png/220px-Cookie_Monster.png", gender: "any" },
+            { name: "Elmo (Sesame Street)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/5/52/Elmo_character.png/220px-Elmo_character.png", gender: "any" },
+            { name: "Big Bird (Sesame Street)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/0/0c/Big_Bird.png/220px-Big_Bird.png", gender: "any" },
+            { name: "Oscar the Grouch (Sesame Street)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/a2/Oscar_the_Grouch.png/220px-Oscar_the_Grouch.png", gender: "any" },
+            { name: "Gengar (Pokemon)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/a7/Gengar.png/220px-Gengar.png", gender: "any" },
+            { name: "Charmander (Pokemon)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/7/73/Charmander_artwork_for_Pokemon_Red_and_Blue.png/220px-Charmander_artwork_for_Pokemon_Red_and_Blue.png", gender: "any" },
+            { name: "Squirtle (Pokemon)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/5/54/Squirtle_artwork_for_Pokemon_Red_and_Blue.png/220px-Squirtle_artwork_for_Pokemon_Red_and_Blue.png", gender: "any" },
+            { name: "Bulbasaur (Pokemon)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/2/21/Bulbasaur_artwork_for_Pokemon_Red_and_Blue.png/220px-Bulbasaur_artwork_for_Pokemon_Red_and_Blue.png", gender: "any" },
+            { name: "Eevee (Pokemon)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/e/e2/Eevee_artwork_for_Pokemon_Red_and_Blue.png/220px-Eevee_artwork_for_Pokemon_Red_and_Blue.png", gender: "any" },
+            { name: "Kirby", image: "https://upload.wikimedia.org/wikipedia/en/thumb/d/d4/Kirby_character.png/220px-Kirby_character.png", gender: "any" },
+            { name: "Pac-Man", image: "https://upload.wikimedia.org/wikipedia/en/thumb/0/09/Pac-Man.png/220px-Pac-Man.png", gender: "any" },
+            { name: "Bender (Futurama)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/a/a6/Bender_Bending_Rodriguez.png/220px-Bender_Bending_Rodriguez.png", gender: "any" },
+            { name: "Stewie Griffin (Family Guy)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/3/34/Stewie_Griffin.png/220px-Stewie_Griffin.png", gender: "any" },
+            { name: "Brian Griffin (Family Guy)", image: "https://upload.wikimedia.org/wikipedia/en/thumb/8/87/Brian_Griffin.png/220px-Brian_Griffin.png", gender: "any" }
+        ];
+
+        // Function to display messages to the user
+        function showMessage(message, isError = false) {
+            messageText.textContent = message;
+            messageBox.classList.remove('hidden');
+            if (isError) {
+                messageBox.classList.remove('bg-green-600');
+                messageBox.classList.add('bg-red-600');
+            } else {
+                messageBox.classList.remove('bg-red-600');
+                messageBox.classList.add('bg-green-600');
+            }
+            // Automatically hide message after 5 seconds
+            setTimeout(() => {
+                messageBox.classList.add('hidden');
+            }, 5000);
+        }
+
+        // Function to start the camera stream
+        async function startCamera() {
+            try {
+                // Request access to the user's camera
+                stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                // Set the video source to the camera stream
+                cameraFeed.srcObject = stream;
+                showMessage("Camera started successfully!", false);
+                // Remove disabled overlay once camera is ready
+                cameraSection.classList.remove('disabled-overlay');
+            } catch (err) {
+                console.error("Error accessing camera: ", err);
+                showMessage("Could not access camera. Please ensure you have a camera and have granted permission.", true);
+                // Keep disabled overlay if camera fails
+                cameraSection.classList.add('disabled-overlay');
+            }
+        }
+
+        // Function to stop the camera stream
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+        }
+
+        // Function to reset the UI for a new photo
+        function resetUI() {
+            stopCamera(); // Stop current camera stream
+            capturedImage.classList.add('hidden');
+            resultSection.classList.add('hidden');
+            cameraFeed.classList.remove('hidden');
+            captureButton.classList.remove('hidden');
+            cameraSection.classList.add('disabled-overlay'); // Disable camera section until gender is selected again
+            genderSelection.classList.remove('hidden'); // Show gender selection again
+            // Reset selected gender to default or 'any'
+            document.getElementById('genderAny').checked = true;
+            selectedGender = 'any';
+            showMessage("Please select your gender to start.", false);
+        }
+
+        // Event listener for gender selection
+        genderRadios.forEach(radio => {
+            radio.addEventListener('change', (event) => {
+                selectedGender = event.target.value;
+                showMessage(`Gender selected: ${selectedGender.charAt(0).toUpperCase() + selectedGender.slice(1)}. Starting camera...`, false);
+                genderSelection.classList.add('hidden'); // Hide gender selection
+                startCamera(); // Start camera once gender is selected
+            });
+        });
+
+        // Event listener for the capture button
+        captureButton.addEventListener('click', () => {
+            if (!stream) {
+                showMessage("Camera not active. Please allow camera access and select gender.", true);
+                return;
+            }
+
+            // Set canvas dimensions to match the video feed
+            photoCanvas.width = cameraFeed.videoWidth;
+            photoCanvas.height = cameraFeed.videoHeight;
+
+            // Get the 2D rendering context of the canvas
+            const context = photoCanvas.getContext('2d');
+            // Draw the current video frame onto the canvas
+            context.drawImage(cameraFeed, 0, 0, photoCanvas.width, photoCanvas.height);
+
+            // Convert the canvas content to a data URL (PNG format)
+            const imageDataURL = photoCanvas.toDataURL('image/png');
+            // Set the captured image source
+            capturedImage.src = imageDataURL;
+            // Display the captured image
+            capturedImage.classList.remove('hidden');
+            // Hide the camera feed and capture button
+            cameraFeed.classList.add('hidden');
+            captureButton.classList.add('hidden');
+            stopCamera(); // Stop camera after capturing photo
+
+            // Show the result section and simulate AI analysis
+            resultSection.classList.remove('hidden');
+            characterMatchName.textContent = "Analyzing...";
+            characterMatchImage.src = "https://placehold.co/128x128/9333ea/ffffff?text=Analyzing..."; // Placeholder for analysis
+
+            // Simulate a delay for AI processing
+            setTimeout(() => {
+                // In a real application, you would send imageDataURL to a backend server here
+                // for facial analysis and matching based on color, face structure, and shape.
+
+                // Filter characters based on selected gender
+                const filteredCharacters = characters.filter(char =>
+                    selectedGender === 'any' || char.gender === selectedGender || char.gender === 'any'
+                );
+
+                // Pick a random character from the filtered list
+                let randomCharacter;
+                if (filteredCharacters.length > 0) {
+                    randomCharacter = filteredCharacters[Math.floor(Math.random() * filteredCharacters.length)];
+                } else {
+                    // Fallback if no characters match the filter (shouldn't happen with 'any' fallback)
+                    randomCharacter = { name: "No Match Found", image: "https://placehold.co/128x128/cccccc/000000?text=No Image", gender: "any" };
+                }
+
+
+                characterMatchName.textContent = randomCharacter.name;
+                characterMatchImage.src = randomCharacter.image;
+                showMessage("Analysis complete! Check your character match.", false);
+
+            }, 3000); // Simulate 3 seconds of processing
+        });
+
+        // Event listener for retake photo button
+        retakeButton.addEventListener('click', resetUI);
+
+        // Initial setup on page load
+        window.onload = () => {
+            resetUI(); // Start with gender selection visible and camera disabled
+            showMessage("Welcome! Please select your gender to begin.", false);
+        };
+
+        // Add touch event listeners for the capture button for mobile devices
+        captureButton.addEventListener('touchstart', (e) => {
+            e.preventDefault(); // Prevent default touch behavior (e.g., scrolling)
+            captureButton.click(); // Trigger the click event
+        });
+
+        // Add touch event listeners for the retake button for mobile devices
+        retakeButton.addEventListener('touchstart', (e) => {
+            e.preventDefault(); // Prevent default touch behavior (e.g., scrolling)
+            retakeButton.click(); // Trigger the click event
+        });
+    </script>
+</body>
+</html>
